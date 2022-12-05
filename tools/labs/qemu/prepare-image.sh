@@ -25,6 +25,14 @@ cat >> $TMP/etc/inittab <<EOF
 5:12345:respawn:/sbin/getty 38400 tty5
 EOF
 
+cat >> $TMP/etc/fstab <<EOF
+//10.0.2.4/qemu /home/root/skels cifs guest,user=guest 0 0
+EOF
+
+mkdir -p $TMP/root/skels
+
+sed -i '/^root/ s@/bin/sh@/bin/bash@' $TMP/etc/passwd
+
 # enable networking
 echo -e "auto eth0\niface eth0 inet dhcp" >> $TMP/etc/network/interfaces
 
