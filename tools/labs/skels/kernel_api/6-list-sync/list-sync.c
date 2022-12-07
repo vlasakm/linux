@@ -25,6 +25,7 @@ struct task_info {
 static struct list_head head;
 
 /* TODO 1: you can use either a spinlock or rwlock, define it here */
+DEFINE_RWLOCK(lock);
 
 static struct task_info *task_info_alloc(int pid)
 {
@@ -60,19 +61,24 @@ static void task_info_add_to_list(int pid)
 	struct task_info *ti;
 
 	/* TODO 1: Protect list, is this read or write access? */
+	write_lock(&lock);
 	ti = task_info_find_pid(pid);
 	if (ti != NULL) {
 		ti->timestamp = jiffies;
 		atomic_inc(&ti->count);
 		/* TODO: Guess why this comment was added  here */
+		write_unlock(&lock);
 		return;
 	}
 	/* TODO 1: critical section ends here */
+	write_unlock(&lock);
 
 	ti = task_info_alloc(pid);
 	/* TODO 1: protect list access, is this read or write access? */
+	write_lock(&lock);
 	list_add(&ti->list, &head);
 	/* TODO 1: critical section ends here */
+	write_unlock(&lock);
 }
 
 void task_info_add_for_current(void)
@@ -83,6 +89,7 @@ void task_info_add_for_current(void)
 	task_info_add_to_list(next_task(next_task(current))->pid);
 }
 /* TODO 2: Export the kernel symbol */
+EXPORT_SYMBOL(task_info_add_for_current);
 
 void task_info_print_list(const char *msg)
 {
@@ -92,14 +99,17 @@ void task_info_print_list(const char *msg)
 	pr_info("%s: [ ", msg);
 
 	/* TODO 1: Protect list, is this read or write access? */
+	read_lock(&lock);
 	list_for_each(p, &head) {
 		ti = list_entry(p, struct task_info, list);
 		pr_info("(%d, %lu) ", ti->pid, ti->timestamp);
 	}
 	/* TODO 1: Critical section ends here */
+	read_unlock(&lock);
 	pr_info("]\n");
 }
 /* TODO 2: Export the kernel symbol */
+EXPORT_SYMBOL(task_info_print_list);
 
 void task_info_remove_expired(void)
 {
@@ -107,6 +117,7 @@ void task_info_remove_expired(void)
 	struct task_info *ti;
 
 	/* TODO 1: Protect list, is this read or write access? */
+	write_lock(&lock);
 	list_for_each_safe(p, q, &head) {
 		ti = list_entry(p, struct task_info, list);
 		if (jiffies - ti->timestamp > 3 * HZ && atomic_read(&ti->count) < 5) {
@@ -115,8 +126,10 @@ void task_info_remove_expired(void)
 		}
 	}
 	/* TODO 1: Critical section ends here */
+	write_unlock(&lock);
 }
 /* TODO 2: Export the kernel symbol */
+EXPORT_SYMBOL(task_info_remove_expired);
 
 static void task_info_purge_list(void)
 {
@@ -124,12 +137,14 @@ static void task_info_purge_list(void)
 	struct task_info *ti;
 
 	/* TODO 1: Protect list, is this read or write access? */
+	write_lock(&lock);
 	list_for_each_safe(p, q, &head) {
 		ti = list_entry(p, struct task_info, list);
 		list_del(p);
 		kfree(ti);
 	}
 	/* TODO 1: Critical sections ends here */
+	write_unlock(&lock);
 }
 
 static int list_sync_init(void)
@@ -147,11 +162,6 @@ static int list_sync_init(void)
 
 static void list_sync_exit(void)
 {
-	struct task_info *ti;
-
-	ti = list_entry(head.prev, struct task_info, list);
-	atomic_set(&ti->count, 10);
-
 	task_info_remove_expired();
 	task_info_print_list("after removing expired");
 	task_info_purge_list();
