@@ -38,8 +38,11 @@ struct mon_proc {
 static struct my_device_data {
 	struct cdev cdev;
 	/* TODO 1: add timer */
+	struct timer_list timer;
 	/* TODO 2: add flag */
+	int io_flag;
 	/* TODO 3: add work */
+	struct work_struct work;
 	/* TODO 4: add list for monitored processes */
 	/* TODO 4: add spinlock to protect list */
 } dev;
@@ -74,15 +77,39 @@ static struct mon_proc *get_proc(pid_t pid)
 
 
 /* TODO 3: define work handler */
+void work_handler(struct work_struct *work)
+{
+	//struct my_device_data *my_data = container_of(work, struct my_device_data, work);
+
+	alloc_io();
+	pr_info("Timer handler ALLOC FINISHED: PID=%d, NAME=%s\n", current->pid, &current->comm[0]);
+}
 
 #define ALLOC_IO_DIRECT
 /* TODO 3: undef ALLOC_IO_DIRECT*/
+#undef ALLOC_IO_DIRECT
 
 static void timer_handler(struct timer_list *tl)
 {
-	/* TODO 1: implement timer handler */
+	struct my_device_data *my_data = container_of(tl, struct my_device_data, timer);
+
 	/* TODO 2: check flags: TIMER_TYPE_SET or TIMER_TYPE_ALLOC */
-		/* TODO 3: schedule work */
+	switch (my_data->io_flag) {
+		case TIMER_TYPE_SET:
+			/* TODO 1: implement timer handler */
+			pr_info("Timer handler SET: PID=%d, NAME=%s\n", current->pid, &current->comm[0]);
+			break;
+		case TIMER_TYPE_ALLOC:
+			pr_info("Timer handler ALLOC: PID=%d, NAME=%s\n", current->pid, &current->comm[0]);
+			#ifdef ALLOC_IO_DIRECT
+			alloc_io();
+			pr_info("Timer handler ALLOC FINISHED: PID=%d, NAME=%s\n", current->pid, &current->comm[0]);
+			#else
+			/* TODO 3: schedule work */
+			schedule_work(&my_data->work);
+			#endif /* ALLOC_IO_DIRECT */
+			break;
+	}
 		/* TODO 4: iterate the list and check the proccess state */
 			/* TODO 4: if task is dead print info ... */
 			/* TODO 4: ... decrement task usage counter ... */
@@ -114,13 +141,18 @@ static long deferred_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	switch (cmd) {
 		case MY_IOCTL_TIMER_SET:
 			/* TODO 2: set flag */
+			my_data->io_flag = TIMER_TYPE_SET;
 			/* TODO 1: schedule timer */
+			mod_timer(&my_data->timer, jiffies + arg * HZ);
 			break;
 		case MY_IOCTL_TIMER_CANCEL:
 			/* TODO 1: cancel timer */
+			del_timer_sync(&my_data->timer);
 			break;
 		case MY_IOCTL_TIMER_ALLOC:
 			/* TODO 2: set flag and schedule timer */
+			my_data->io_flag = TIMER_TYPE_ALLOC;
+			mod_timer(&my_data->timer, jiffies + arg * HZ);
 			break;
 		case MY_IOCTL_TIMER_MON:
 		{
@@ -155,7 +187,9 @@ static int deferred_init(void)
 	}
 
 	/* TODO 2: Initialize flag. */
+	dev.io_flag = TIMER_TYPE_NONE;
 	/* TODO 3: Initialize work. */
+	INIT_WORK(&dev.work, work_handler);
 
 	/* TODO 4: Initialize lock and list. */
 
@@ -163,6 +197,7 @@ static int deferred_init(void)
 	cdev_add(&dev.cdev, MKDEV(MY_MAJOR, MY_MINOR), 1);
 
 	/* TODO 1: Initialize timer. */
+	timer_setup(&dev.timer, timer_handler, 0);
 
 	return 0;
 }
@@ -177,7 +212,9 @@ static void deferred_exit(void)
 	unregister_chrdev_region(MKDEV(MY_MAJOR, MY_MINOR), 1);
 
 	/* TODO 1: Cleanup: make sure the timer is not running after exiting. */
+	del_timer_sync(&dev.timer);
 	/* TODO 3: Cleanup: make sure the work handler is not scheduled. */
+	cancel_work_sync(&dev.work);
 
 	/* TODO 4: Cleanup the monitered process list */
 		/* TODO 4: ... decrement task usage counter ... */
